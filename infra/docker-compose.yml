@@ -1,0 +1,103 @@
+# Topologia local — espelha docs/13-deployment-strategy.md e docs/03-architecture.md §10.
+# Sprint 1 usa apenas: postgres, pgbouncer, redis-broker, api, worker (fila "platform"/outbox-relay).
+# redis-cache e filas sync.shopee/sync.bling existem desde já para paridade dev/prod
+# (docs/13-deployment-strategy.md §1), mas ficam ociosas até os Sprints 2/3.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: seller_intelligence
+      POSTGRES_USER: seller_intelligence
+      POSTGRES_PASSWORD: local_dev_only
+      # Role de runtime não-superusuário (api/worker/pgbouncer) — nunca POSTGRES_USER, que
+      # é sempre superuser e por isso nunca sofre RLS, mesmo com FORCE ROW LEVEL SECURITY
+      # (docs/09-multi-tenant-strategy.md §2). Criada por postgres-init/01-create-app-role.sh;
+      # migrations continuam usando POSTGRES_USER (dono do schema).
+      APP_DB_USER: seller_intelligence_app
+      APP_DB_PASSWORD: app_local_dev_only
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seller_intelligence"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # PgBouncer em modo transaction — testa desde o Sprint 0/1 a compatibilidade com
+  # SET LOCAL descrita em docs/09-multi-tenant-strategy.md §3. Conecta como
+  # seller_intelligence_app (não o superuser) para que RLS seja de fato aplicado.
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DATABASE_URL: postgres://seller_intelligence_app:app_local_dev_only@postgres:5432/seller_intelligence
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 200
+      DEFAULT_POOL_SIZE: 20
+      # postgres:16-alpine usa password_encryption=scram-sha-256 por padrão; sem isto o
+      # entrypoint gera auth_type=md5 e o PgBouncer não consegue repassar a autenticação
+      # SCRAM ao Postgres ("cannot do SCRAM authentication: wrong password type").
+      AUTH_TYPE: scram-sha-256
+    ports:
+      - "6432:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Broker + result backend do Celery — noeviction, nunca compartilha instância com cache
+  # (resolve R2 da Architecture Review, docs/03-architecture.md §10).
+  redis-broker:
+    image: redis:7-alpine
+    command: redis-server --maxmemory-policy noeviction --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_broker_data:/data
+
+  # Cache de leitura da API — allkeys-lru, sem persistência.
+  redis-cache:
+    image: redis:7-alpine
+    command: redis-server --maxmemory-policy allkeys-lru
+    ports:
+      - "6380:6379"
+
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://seller_intelligence_app:app_local_dev_only@pgbouncer:5432/seller_intelligence
+      REDIS_BROKER_URL: redis://redis-broker:6379/0
+      REDIS_CACHE_URL: redis://redis-cache:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["uvicorn", "seller_intelligence.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # Worker único no Sprint 1, consumindo a fila usada pelo Outbox Relay e pela auditoria.
+  # A partir do Sprint 2/7, este serviço se multiplica por fila (sync.shopee, sync.bling,
+  # recompute, copilot) conforme docs/13-deployment-strategy.md §2.
+  worker:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://seller_intelligence_app:app_local_dev_only@pgbouncer:5432/seller_intelligence
+      REDIS_BROKER_URL: redis://redis-broker:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["celery", "-A", "seller_intelligence.shared.infrastructure.celery_app", "worker", "--queues=platform,outbox-relay", "--loglevel=info"]
+
+volumes:
+  postgres_data:
+  redis_broker_data:

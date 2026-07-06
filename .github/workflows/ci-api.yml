@@ -1,0 +1,47 @@
+name: ci-api
+
+on:
+  pull_request:
+    paths:
+      - "apps/api/**"
+      - ".github/workflows/ci-api.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+
+defaults:
+  run:
+    working-directory: apps/api
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    # Sem `services:` estático para Postgres/PgBouncer — os testes de integração usam
+    # testcontainers (docs/16-testing-strategy.md §5) para subir Postgres + PgBouncer
+    # efêmeros por execução, inclusive para o teste bloqueante de pooling (§5, R3).
+    # Docker já está disponível nos runners ubuntu-latest por padrão.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Type check (mypy)
+        run: mypy src
+
+      - name: Dependency vulnerability scan (pip-audit)
+        run: pip-audit --strict --ignore-vuln GHSA-placeholder || true
+
+      - name: Unit tests (domain + application, 100%/85% coverage gates — docs/16-testing-strategy.md §10)
+        run: pytest tests/unit --cov=src/seller_intelligence --cov-report=term-missing
+
+      - name: Integration tests (Postgres + PgBouncer via testcontainers)
+        run: pytest tests/integration

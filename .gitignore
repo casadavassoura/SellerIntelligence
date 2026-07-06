@@ -1,0 +1,23 @@
+# Segredos locais — nunca commitar (docs/12-security.md §3)
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Node (apps/web, quando existir)
+node_modules/
+.next/
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
