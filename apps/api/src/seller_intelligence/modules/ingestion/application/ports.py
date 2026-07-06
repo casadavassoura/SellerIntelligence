@@ -48,3 +48,20 @@ class SyncLogRepository(ABC):
     async def list_by_integration(
         self, integration_id: uuid.UUID, *, limit: int = 20
     ) -> list[SyncLog]: ...
+
+
+class RateLimiterPort(ABC):
+    """Token bucket em dois níveis — docs/03-architecture.md §11. Uma chamada externa só
+    prossegue se **ambos** os buckets tiverem token disponível; a composição dessa regra
+    é responsabilidade de quem chama (ex.: `ShopeeAdapter`), não desta porta. Falta de
+    token não é erro — o chamador deve reenfileirar com delay, nunca bloquear esperando."""
+
+    @abstractmethod
+    async def acquire_global(self, provider: ProviderType) -> bool:
+        """Bucket único por provider (`shopee:global`) — protege contra o teto agregado
+        do aplicativo parceiro (docs/15-architecture-review.md §6)."""
+
+    @abstractmethod
+    async def acquire_tenant(self, provider: ProviderType, tenant_id: uuid.UUID) -> bool:
+        """Bucket por `(provider, tenant_id)` — calibrado com o limite real documentado
+        pela Shopee (~10 req/s por loja), ver plano de implementação do Sprint 2."""

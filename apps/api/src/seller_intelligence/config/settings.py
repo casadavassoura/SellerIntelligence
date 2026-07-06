@@ -22,6 +22,15 @@ class Settings(BaseSettings):
 
     field_encryption_key: str
 
+    # Bucket por tenant calibrado com o limite real e documentado da Shopee (~10 req/s por
+    # loja — docs/15-architecture-review.md §6, validado via pesquisa antes de implementar,
+    # recomendação #4 da Architecture Review). O bucket global é uma margem de engenharia
+    # própria (defesa contra abuso agregado da aplicação), não um número publicado pela
+    # Shopee — mantidos como settings distintos para nunca confundir os dois na leitura do
+    # código (ver plano de implementação do Sprint 2).
+    shopee_tenant_rate_limit_per_second: float = 10.0
+    shopee_global_rate_limit_per_second: float = 50.0
+
 
 @lru_cache
 def get_settings() -> Settings:
