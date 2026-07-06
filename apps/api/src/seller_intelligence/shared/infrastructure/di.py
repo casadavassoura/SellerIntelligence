@@ -6,9 +6,18 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+import httpx
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from seller_intelligence.config.settings import get_settings
+from seller_intelligence.modules.ingestion.application.services.integration_service import (
+    IntegrationService,
+)
+from seller_intelligence.modules.ingestion.infrastructure.repositories import (
+    SqlAlchemyIntegrationRepository,
+)
+from seller_intelligence.modules.ingestion.infrastructure.shopee.adapter import ShopeeAdapter
 from seller_intelligence.modules.platform.application.services.auth_service import AuthService
 from seller_intelligence.modules.platform.application.services.tenant_service import TenantService
 from seller_intelligence.modules.platform.infrastructure.repositories import (
@@ -17,6 +26,28 @@ from seller_intelligence.modules.platform.infrastructure.repositories import (
     SqlAlchemyUserRepository,
 )
 from seller_intelligence.shared.infrastructure.db import get_session
+
+_http_client: httpx.AsyncClient | None = None
+
+
+def get_http_client() -> httpx.AsyncClient:
+    """Singleton — reaproveitado entre requisições (evita reabrir pool de conexão TCP a
+    cada chamada externa), mesmo padrão de singleton do engine SQLAlchemy (db.py)."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=30.0)
+    return _http_client
+
+
+def get_shopee_adapter() -> ShopeeAdapter:
+    settings = get_settings()
+    return ShopeeAdapter(
+        partner_id=settings.shopee_partner_id,
+        partner_key=settings.shopee_partner_key,
+        api_base_url=settings.shopee_api_base_url,
+        redirect_uri=settings.shopee_redirect_uri,
+        http_client=get_http_client(),
+    )
 
 
 async def get_auth_service(
@@ -35,4 +66,13 @@ async def get_tenant_service(
     yield TenantService(
         tenant_repository=SqlAlchemyTenantRepository(session),
         user_repository=SqlAlchemyUserRepository(session),
+    )
+
+
+async def get_integration_service(
+    session: AsyncSession = Depends(get_session),
+) -> AsyncIterator[IntegrationService]:
+    yield IntegrationService(
+        integration_repository=SqlAlchemyIntegrationRepository(session),
+        shopee_adapter=get_shopee_adapter(),
     )

@@ -22,3 +22,9 @@ class InvalidOAuthStateError(DomainError):
 class SyncAlreadyCompletedError(DomainError):
     """Um SyncLog já em estado final (`completed`/`failed`) não pode transicionar de novo —
     fato imutável, mesmo raciocínio aplicado a `Order` (docs/04-database-erd.md §4)."""
+
+
+class IntegrationUnavailableError(DomainError):
+    """Chamada a serviço externo (Shopee/Bling) nunca propaga exception da biblioteca
+    HTTP cliente diretamente — `infrastructure/` sempre traduz para esta exception
+    (docs/17-coding-standards.md §6), preservando a causa original."""

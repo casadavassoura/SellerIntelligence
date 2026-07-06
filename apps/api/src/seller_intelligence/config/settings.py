@@ -31,6 +31,15 @@ class Settings(BaseSettings):
     shopee_tenant_rate_limit_per_second: float = 10.0
     shopee_global_rate_limit_per_second: float = 50.0
 
+    # Credenciais do app parceiro Shopee (nunca por tenant — é o mesmo app parceiro para
+    # todos os tenants, docs/03-architecture.md §11). Default local aponta para o ambiente
+    # sandbox/test-stable da Shopee (docs/16-testing-strategy.md §4: nunca a API real em
+    # CI/dev sem credencial validada).
+    shopee_partner_id: str = "change-me-shopee-partner-id"
+    shopee_partner_key: str = "change-me-shopee-partner-key"
+    shopee_redirect_uri: str = "http://localhost:8000/api/v1/integrations/shopee/callback"
+    shopee_api_base_url: str = "https://partner.test-stable.shopeemobile.com"
+
 
 @lru_cache
 def get_settings() -> Settings:

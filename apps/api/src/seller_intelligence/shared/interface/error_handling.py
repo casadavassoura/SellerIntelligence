@@ -6,6 +6,13 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from seller_intelligence.modules.ingestion.domain.exceptions import (
+    IntegrationAlreadyConnectedError,
+    IntegrationNotFoundError,
+    IntegrationUnavailableError,
+    InvalidOAuthStateError,
+    SyncAlreadyCompletedError,
+)
 from seller_intelligence.modules.platform.domain.exceptions import (
     EmailAlreadyRegisteredError,
     InsufficientPermissionError,
@@ -27,6 +34,11 @@ _STATUS_BY_EXCEPTION: dict[type[DomainError], int] = {
     InvalidMfaCodeError: 401,
     InsufficientPermissionError: 403,
     MembershipNotFoundError: 404,
+    IntegrationAlreadyConnectedError: 409,
+    IntegrationNotFoundError: 404,
+    InvalidOAuthStateError: 401,
+    IntegrationUnavailableError: 503,
+    SyncAlreadyCompletedError: 409,
 }
 _DEFAULT_STATUS = 400
 
