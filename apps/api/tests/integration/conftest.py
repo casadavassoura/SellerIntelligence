@@ -154,6 +154,8 @@ async def session_factory(
         tenant_id = db_module.current_tenant_id.get()
         safe = db_module._quote_tenant_id(tenant_id)
         connection.exec_driver_sql(f"SET LOCAL app.tenant_id = '{safe}'")
+        system_job_flag = "true" if db_module.is_system_job.get() else "false"
+        connection.exec_driver_sql(f"SET LOCAL app.is_system_job = '{system_job_flag}'")
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
     yield factory

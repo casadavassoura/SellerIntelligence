@@ -27,6 +27,12 @@ current_tenant_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "current_tenant_id", default=None
 )
 
+# Habilita, só para a transação corrente, a policy `system_job_read_all` (leitura
+# cross-tenant) em tabelas que a definem explicitamente — nunca setado por request HTTP
+# nem por job por-tenant, apenas pelo fan-out periódico do SyncOrchestrationService
+# (docs/09-multi-tenant-strategy.md §4, shared/infrastructure/tenant_context.py).
+is_system_job: contextvars.ContextVar[bool] = contextvars.ContextVar("is_system_job", default=False)
+
 
 def _quote_tenant_id(raw_tenant_id: str | None) -> str:
     """Valida e normaliza o tenant_id antes de interpolar em `SET LOCAL`.
@@ -61,6 +67,10 @@ def create_engine() -> AsyncEngine:
         # tenant está no contexto (ex.: job administrativo, migração), a policy RLS nega
         # acesso a toda tabela tenant-scoped — nunca fica "sem filtro".
         connection.exec_driver_sql(f"SET LOCAL app.tenant_id = '{tenant_id}'")  # type: ignore[attr-defined]
+        system_job_flag = "true" if is_system_job.get() else "false"
+        connection.exec_driver_sql(  # type: ignore[attr-defined]
+            f"SET LOCAL app.is_system_job = '{system_job_flag}'"
+        )
 
     return engine
 

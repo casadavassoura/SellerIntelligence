@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import Request, Response
 
 from seller_intelligence.shared.domain.exceptions import DomainError
-from seller_intelligence.shared.infrastructure.db import current_tenant_id
+from seller_intelligence.shared.infrastructure.db import current_tenant_id, is_system_job
 from seller_intelligence.shared.security.jwt import decode_access_token
 
 
@@ -45,3 +45,14 @@ def set_tenant_context_for_job(tenant_id: str) -> None:
     """Chamado explicitamente no início de toda Celery task (nunca inferido de estado
     global do worker) — docs/09-multi-tenant-strategy.md §4."""
     current_tenant_id.set(tenant_id)
+
+
+def set_system_job_context() -> None:
+    """Habilita a policy `system_job_read_all` (leitura cross-tenant, só-SELECT) para a
+    transação corrente — usado exclusivamente pelo fan-out periódico do
+    `SyncOrchestrationService`, que precisa enumerar integrações ativas de todos os
+    tenants para decidir quem sincronizar (nenhum "contexto de todos os tenants" existe
+    via `current_tenant_id`, docs/09-multi-tenant-strategy.md §4). Nunca chamado em
+    request HTTP nem em job por-tenant — cada tabela que precisa dessa leitura declara a
+    policy explicitamente na sua migration (só `core.integration` no Sprint 2)."""
+    is_system_job.set(True)

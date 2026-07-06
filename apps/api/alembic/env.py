@@ -11,6 +11,10 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 from seller_intelligence.config.settings import get_settings
+from seller_intelligence.modules.ingestion.infrastructure.models import (  # noqa: F401
+    IntegrationModel,
+    SyncLogModel,
+)
 from seller_intelligence.modules.platform.infrastructure.models import (  # noqa: F401
     AuditLogModel,
     MembershipModel,
