@@ -15,6 +15,7 @@ from seller_intelligence.modules.ingestion.application.dto import (
 )
 from seller_intelligence.modules.ingestion.domain.entities import Integration, SyncLog
 from seller_intelligence.modules.ingestion.domain.value_objects import ProviderType
+from seller_intelligence.shared.domain.base import DomainEvent
 
 
 class IntegrationRepository(ABC):
@@ -48,7 +49,16 @@ class SyncLogRepository(ABC):
     async def add(self, sync_log: SyncLog) -> None: ...
 
     @abstractmethod
-    async def update(self, sync_log: SyncLog) -> None: ...
+    async def update(
+        self, sync_log: SyncLog, *, extra_events: list[DomainEvent] | None = None
+    ) -> None:
+        """`extra_events` carrega os eventos de dado ingerido (`ProductIngested`/
+        `OrderIngested`/`CampaignMetricIngested`) — não pertencem a um agregado específico
+        (docs/14-ddd-tactical-design.md §3), então `SyncOrchestrationService` não tem uma
+        Entity própria para gravá-los; a transação natural é a do `SyncLog` que a
+        sincronização está concluindo. Mantém `application/` livre de `AsyncSession`
+        (docs/03-architecture.md §4.1) — só `infrastructure/repositories.py` conhece o
+        Outbox."""
 
     @abstractmethod
     async def list_by_integration(

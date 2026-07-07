@@ -11,6 +11,7 @@ from seller_intelligence.modules.ingestion.domain.exceptions import (
     IntegrationNotFoundError,
     IntegrationUnavailableError,
     InvalidOAuthStateError,
+    RateLimitExceededError,
     SyncAlreadyCompletedError,
 )
 from seller_intelligence.modules.platform.domain.exceptions import (
@@ -39,6 +40,7 @@ _STATUS_BY_EXCEPTION: dict[type[DomainError], int] = {
     InvalidOAuthStateError: 401,
     IntegrationUnavailableError: 503,
     SyncAlreadyCompletedError: 409,
+    RateLimitExceededError: 429,
 }
 _DEFAULT_STATUS = 400
 

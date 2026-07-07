@@ -12,6 +12,7 @@ from seller_intelligence.modules.ingestion.application.ports import (
 )
 from seller_intelligence.modules.ingestion.domain.entities import Integration, SyncLog
 from seller_intelligence.modules.ingestion.domain.value_objects import ProviderType
+from seller_intelligence.shared.domain.base import DomainEvent
 
 
 class InMemoryIntegrationRepository(IntegrationRepository):
@@ -51,13 +52,18 @@ class InMemoryIntegrationRepository(IntegrationRepository):
 class InMemorySyncLogRepository(SyncLogRepository):
     def __init__(self) -> None:
         self._by_id: dict[uuid.UUID, SyncLog] = {}
+        self.published_events: list[DomainEvent] = []
 
     async def add(self, sync_log: SyncLog) -> None:
-        sync_log.pull_pending_events()
+        self.published_events.extend(sync_log.pull_pending_events())
         self._by_id[sync_log.id] = sync_log
 
-    async def update(self, sync_log: SyncLog) -> None:
-        sync_log.pull_pending_events()
+    async def update(
+        self, sync_log: SyncLog, *, extra_events: list[DomainEvent] | None = None
+    ) -> None:
+        self.published_events.extend(sync_log.pull_pending_events())
+        if extra_events:
+            self.published_events.extend(extra_events)
         self._by_id[sync_log.id] = sync_log
 
     async def list_by_integration(

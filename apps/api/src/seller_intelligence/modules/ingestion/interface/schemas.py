@@ -19,3 +19,16 @@ class IntegrationResponse(BaseModel):
     is_active: bool
     last_sync_at: datetime | None
     last_sync_status: str | None
+
+
+class SyncLogResponse(BaseModel):
+    id: uuid.UUID
+    integration_id: uuid.UUID
+    provider: str
+    status: str
+    started_at: datetime
+    completed_at: datetime | None
+    products_ingested: int
+    orders_ingested: int
+    campaigns_ingested: int
+    error_message: str | None

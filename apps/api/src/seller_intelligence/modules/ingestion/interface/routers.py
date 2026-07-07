@@ -15,12 +15,19 @@ from fastapi import APIRouter, Depends
 from seller_intelligence.modules.ingestion.application.services.integration_service import (
     IntegrationService,
 )
+from seller_intelligence.modules.ingestion.application.services.sync_orchestration_service import (
+    SyncOrchestrationService,
+)
 from seller_intelligence.modules.ingestion.interface.schemas import (
     IntegrationResponse,
     ShopeeAuthorizationUrlResponse,
+    SyncLogResponse,
 )
 from seller_intelligence.modules.platform.domain.value_objects import Role
-from seller_intelligence.shared.infrastructure.di import get_integration_service
+from seller_intelligence.shared.infrastructure.di import (
+    get_integration_service,
+    get_sync_orchestration_service,
+)
 from seller_intelligence.shared.security.dependencies import require_roles
 from seller_intelligence.shared.security.jwt import AccessTokenClaims
 
@@ -57,4 +64,27 @@ async def shopee_callback(
         last_sync_status=(
             integration.last_sync_status.value if integration.last_sync_status else None
         ),
+    )
+
+
+@ingestion_router.post("/{integration_id}/sync", response_model=SyncLogResponse)
+async def sync_integration(
+    integration_id: uuid.UUID,
+    claims: AccessTokenClaims = Depends(_require_owner_or_admin),
+    sync_service: SyncOrchestrationService = Depends(get_sync_orchestration_service),
+) -> SyncLogResponse:
+    sync_log = await sync_service.sync_now(
+        tenant_id=uuid.UUID(claims.tenant_id), integration_id=integration_id
+    )
+    return SyncLogResponse(
+        id=sync_log.id,
+        integration_id=sync_log.integration_id,
+        provider=sync_log.provider.value,
+        status=sync_log.status.value,
+        started_at=sync_log.started_at,
+        completed_at=sync_log.completed_at,
+        products_ingested=sync_log.stats.products_ingested,
+        orders_ingested=sync_log.stats.orders_ingested,
+        campaigns_ingested=sync_log.stats.campaigns_ingested,
+        error_message=sync_log.error_message,
     )

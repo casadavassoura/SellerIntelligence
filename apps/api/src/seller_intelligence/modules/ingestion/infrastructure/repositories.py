@@ -25,6 +25,7 @@ from seller_intelligence.modules.ingestion.infrastructure.models import (
     IntegrationModel,
     SyncLogModel,
 )
+from seller_intelligence.shared.domain.base import DomainEvent
 from seller_intelligence.shared.infrastructure.outbox import add_events_to_session
 
 
@@ -97,7 +98,9 @@ class SqlAlchemySyncLogRepository(SyncLogRepository):
         add_events_to_session(self._session, sync_log.pull_pending_events())
         await self._session.flush()
 
-    async def update(self, sync_log: SyncLog) -> None:
+    async def update(
+        self, sync_log: SyncLog, *, extra_events: list[DomainEvent] | None = None
+    ) -> None:
         model = await self._session.get(SyncLogModel, sync_log.id)
         assert model is not None, f"SyncLog {sync_log.id} não existe para update"
         model.status = sync_log.status.value
@@ -108,7 +111,10 @@ class SqlAlchemySyncLogRepository(SyncLogRepository):
             "campaigns_ingested": sync_log.stats.campaigns_ingested,
         }
         model.error_message = sync_log.error_message
-        add_events_to_session(self._session, sync_log.pull_pending_events())
+        events = sync_log.pull_pending_events()
+        if extra_events:
+            events.extend(extra_events)
+        add_events_to_session(self._session, events)
         await self._session.flush()
 
     async def list_by_integration(
