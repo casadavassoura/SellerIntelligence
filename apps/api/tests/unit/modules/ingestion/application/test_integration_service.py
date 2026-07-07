@@ -14,11 +14,15 @@ from seller_intelligence.modules.ingestion.application.services.integration_serv
 )
 from seller_intelligence.modules.ingestion.domain.exceptions import (
     IntegrationAlreadyConnectedError,
+    IntegrationNotFoundError,
 )
 from seller_intelligence.modules.ingestion.domain.value_objects import ProviderType
 from seller_intelligence.modules.ingestion.infrastructure.oauth_state import create_oauth_state
 from seller_intelligence.modules.ingestion.infrastructure.shopee.adapter import ShopeeAdapter
-from tests.fakes.in_memory_ingestion_repositories import InMemoryIntegrationRepository
+from tests.fakes.in_memory_ingestion_repositories import (
+    InMemoryIntegrationRepository,
+    InMemorySyncLogRepository,
+)
 from tests.fakes.rate_limiter import AlwaysAllowRateLimiter
 
 _TOKEN_RESPONSE_FIXTURE = {
@@ -42,7 +46,11 @@ def _make_service() -> tuple[IntegrationService, InMemoryIntegrationRepository]:
         rate_limiter=AlwaysAllowRateLimiter(),
     )
     repo = InMemoryIntegrationRepository()
-    return IntegrationService(integration_repository=repo, shopee_adapter=adapter), repo
+    sync_log_repo = InMemorySyncLogRepository()
+    service = IntegrationService(
+        integration_repository=repo, sync_log_repository=sync_log_repo, shopee_adapter=adapter
+    )
+    return service, repo
 
 
 def test_build_shopee_authorization_url_embeds_state() -> None:
@@ -97,3 +105,51 @@ async def test_complete_shopee_connection_for_different_tenants_both_succeed() -
 
     assert integration_a.tenant_id != integration_b.tenant_id
     assert len(await repo.list_all_active_by_provider(ProviderType.SHOPEE)) == 2
+
+
+async def test_get_owned_integration_returns_integration_for_correct_tenant() -> None:
+    service, _ = _make_service()
+    tenant_id = uuid.uuid4()
+    connected = await service.complete_shopee_connection(
+        state=create_oauth_state(tenant_id=tenant_id), code="auth-code", shop_id="999"
+    )
+
+    found = await service.get_owned_integration(tenant_id=tenant_id, integration_id=connected.id)
+
+    assert found.id == connected.id
+
+
+async def test_get_owned_integration_for_wrong_tenant_raises_not_found() -> None:
+    service, _ = _make_service()
+    connected = await service.complete_shopee_connection(
+        state=create_oauth_state(tenant_id=uuid.uuid4()), code="auth-code", shop_id="999"
+    )
+
+    with pytest.raises(IntegrationNotFoundError):
+        await service.get_owned_integration(tenant_id=uuid.uuid4(), integration_id=connected.id)
+
+
+async def test_list_integrations_returns_only_the_tenants_own() -> None:
+    service, _ = _make_service()
+    tenant_id = uuid.uuid4()
+    await service.complete_shopee_connection(
+        state=create_oauth_state(tenant_id=tenant_id), code="code-a", shop_id="111"
+    )
+    await service.complete_shopee_connection(
+        state=create_oauth_state(tenant_id=uuid.uuid4()), code="code-b", shop_id="222"
+    )
+
+    integrations = await service.list_integrations(tenant_id=tenant_id)
+
+    assert len(integrations) == 1
+    assert integrations[0].tenant_id == tenant_id
+
+
+async def test_list_sync_logs_for_wrong_tenant_raises_not_found() -> None:
+    service, _ = _make_service()
+    connected = await service.complete_shopee_connection(
+        state=create_oauth_state(tenant_id=uuid.uuid4()), code="auth-code", shop_id="999"
+    )
+
+    with pytest.raises(IntegrationNotFoundError):
+        await service.list_sync_logs(tenant_id=uuid.uuid4(), integration_id=connected.id)

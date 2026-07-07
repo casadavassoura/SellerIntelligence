@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextvars
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
@@ -91,6 +92,26 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     if _session_factory is None:
         _session_factory = async_sessionmaker(get_engine(), expire_on_commit=False)
     return _session_factory
+
+
+@asynccontextmanager
+async def scoped_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Engine efêmero, descartado ao final — use em qualquer código que chame
+    `asyncio.run()` repetidamente dentro do **mesmo processo do SO** (toda Celery task
+    síncrona que roda `asyncio.run(_algo_async())`, como um worker prefork faz ao longo
+    da vida do processo).
+
+    Reaproveitar o engine cacheado de `get_session_factory()` nesse cenário quebra com
+    "attached to a different loop": o pool de conexões asyncpg fica vinculado ao event
+    loop da primeira chamada, e cada `asyncio.run()` cria um loop novo — descoberto ao
+    rodar de verdade o Celery Beat pela primeira vez neste ambiente (nunca fora do MVP
+    local até o Sprint 2), não por inspeção estática. O processo da API nunca precisa
+    disto: um único event loop serve toda a vida do processo uvicorn."""
+    engine = create_engine()
+    try:
+        yield async_sessionmaker(engine, expire_on_commit=False)
+    finally:
+        await engine.dispose()
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

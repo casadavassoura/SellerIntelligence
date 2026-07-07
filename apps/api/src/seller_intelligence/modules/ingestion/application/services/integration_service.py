@@ -7,10 +7,14 @@ from __future__ import annotations
 
 import uuid
 
-from seller_intelligence.modules.ingestion.application.ports import IntegrationRepository
-from seller_intelligence.modules.ingestion.domain.entities import Integration
+from seller_intelligence.modules.ingestion.application.ports import (
+    IntegrationRepository,
+    SyncLogRepository,
+)
+from seller_intelligence.modules.ingestion.domain.entities import Integration, SyncLog
 from seller_intelligence.modules.ingestion.domain.exceptions import (
     IntegrationAlreadyConnectedError,
+    IntegrationNotFoundError,
 )
 from seller_intelligence.modules.ingestion.domain.value_objects import OAuthCredential, ProviderType
 from seller_intelligence.modules.ingestion.infrastructure.oauth_state import (
@@ -24,9 +28,14 @@ from seller_intelligence.shared.security.encryption import encrypt_field
 
 class IntegrationService:
     def __init__(
-        self, *, integration_repository: IntegrationRepository, shopee_adapter: ShopeeAdapter
+        self,
+        *,
+        integration_repository: IntegrationRepository,
+        sync_log_repository: SyncLogRepository,
+        shopee_adapter: ShopeeAdapter,
     ) -> None:
         self._integrations = integration_repository
+        self._sync_logs = sync_log_repository
         self._shopee_adapter = shopee_adapter
 
     def build_shopee_authorization_url(self, *, tenant_id: uuid.UUID) -> str:
@@ -65,3 +74,22 @@ class IntegrationService:
         )
         await self._integrations.add(integration)
         return integration
+
+    async def get_owned_integration(
+        self, *, tenant_id: uuid.UUID, integration_id: uuid.UUID
+    ) -> Integration:
+        integration = await self._integrations.get_by_id(integration_id)
+        if integration is None or integration.tenant_id != tenant_id:
+            raise IntegrationNotFoundError(f"Integration {integration_id} não encontrada")
+        return integration
+
+    async def list_integrations(self, *, tenant_id: uuid.UUID) -> list[Integration]:
+        return await self._integrations.list_by_tenant(tenant_id)
+
+    async def list_sync_logs(
+        self, *, tenant_id: uuid.UUID, integration_id: uuid.UUID
+    ) -> list[SyncLog]:
+        """RF07 — status/erros de sincronização visíveis. Valida que a integração
+        pertence ao tenant antes de expor seu histórico de sync."""
+        await self.get_owned_integration(tenant_id=tenant_id, integration_id=integration_id)
+        return await self._sync_logs.list_by_integration(integration_id)

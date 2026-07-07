@@ -1,7 +1,7 @@
 # Topologia local — espelha docs/13-deployment-strategy.md e docs/03-architecture.md §10.
-# Sprint 1 usa apenas: postgres, pgbouncer, redis-broker, api, worker (fila "platform"/outbox-relay).
-# redis-cache e filas sync.shopee/sync.bling existem desde já para paridade dev/prod
-# (docs/13-deployment-strategy.md §1), mas ficam ociosas até os Sprints 2/3.
+# Sprint 2 adiciona `beat` (Celery Beat — nenhum job agendado rodava de fato sem ele, só em
+# teste direto) e `worker-shopee` (fila dedicada `sync.shopee`, nunca a mesma fila do worker
+# genérico — docs/13-deployment-strategy.md §2). `sync.bling` fica ociosa até o Sprint 3.
 
 services:
   postgres:
@@ -81,8 +81,8 @@ services:
         condition: service_healthy
     command: ["uvicorn", "seller_intelligence.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
-  # Worker único no Sprint 1, consumindo a fila usada pelo Outbox Relay e pela auditoria.
-  # A partir do Sprint 2/7, este serviço se multiplica por fila (sync.shopee, sync.bling,
+  # Worker genérico, consumindo a fila usada pelo Outbox Relay e pela auditoria.
+  # A partir do Sprint 3/7, mais filas dedicadas se juntam a sync.shopee (sync.bling,
   # recompute, copilot) conforme docs/13-deployment-strategy.md §2.
   worker:
     build:
@@ -97,6 +97,39 @@ services:
       postgres:
         condition: service_healthy
     command: ["celery", "-A", "seller_intelligence.shared.infrastructure.celery_app", "worker", "--queues=platform,outbox-relay", "--loglevel=info"]
+
+  # Worker dedicado à sincronização Shopee — nunca a mesma fila/pool do worker genérico,
+  # para que um provider em backoff não consuma capacidade destinada a outra fila
+  # (docs/13-deployment-strategy.md §2, docs/03-architecture.md §9).
+  worker-shopee:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://seller_intelligence_app:app_local_dev_only@pgbouncer:5432/seller_intelligence
+      REDIS_BROKER_URL: redis://redis-broker:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["celery", "-A", "seller_intelligence.shared.infrastructure.celery_app", "worker", "--queues=sync.shopee", "--loglevel=info"]
+
+  # Celery Beat — sem ele, nenhum job de `beat_schedule` (Outbox Relay, fan-out de sync)
+  # dispara de fato fora dos testes (só invocados diretamente por chamada de função).
+  beat:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://seller_intelligence_app:app_local_dev_only@pgbouncer:5432/seller_intelligence
+      REDIS_BROKER_URL: redis://redis-broker:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["celery", "-A", "seller_intelligence.shared.infrastructure.celery_app", "beat", "--loglevel=info"]
 
 volumes:
   postgres_data:

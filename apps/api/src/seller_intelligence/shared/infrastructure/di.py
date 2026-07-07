@@ -15,9 +15,6 @@ from seller_intelligence.config.settings import get_settings
 from seller_intelligence.modules.ingestion.application.services.integration_service import (
     IntegrationService,
 )
-from seller_intelligence.modules.ingestion.application.services.sync_orchestration_service import (
-    SyncOrchestrationService,
-)
 from seller_intelligence.modules.ingestion.infrastructure.repositories import (
     SqlAlchemyIntegrationRepository,
     SqlAlchemySyncLogRepository,
@@ -91,15 +88,6 @@ async def get_integration_service(
 ) -> AsyncIterator[IntegrationService]:
     yield IntegrationService(
         integration_repository=SqlAlchemyIntegrationRepository(session),
-        shopee_adapter=get_shopee_adapter(),
-    )
-
-
-async def get_sync_orchestration_service(
-    session: AsyncSession = Depends(get_session),
-) -> AsyncIterator[SyncOrchestrationService]:
-    yield SyncOrchestrationService(
-        integration_repository=SqlAlchemyIntegrationRepository(session),
         sync_log_repository=SqlAlchemySyncLogRepository(session),
-        ingestion_port=get_shopee_adapter(),
+        shopee_adapter=get_shopee_adapter(),
     )

@@ -91,7 +91,7 @@ def register_relay_task() -> None:
     Import tardio de `celery_app` (evita import circular — celery_app.py referencia esta
     task só pelo nome em string, não importa este módulo)."""
     from seller_intelligence.shared.infrastructure.celery_app import celery_app
-    from seller_intelligence.shared.infrastructure.db import get_session_factory
+    from seller_intelligence.shared.infrastructure.db import scoped_session_factory
 
     @celery_app.task(
         name="seller_intelligence.shared.infrastructure.outbox.relay_pending_events_task"
@@ -100,8 +100,14 @@ def register_relay_task() -> None:
         import asyncio
 
         async def _run() -> int:
-            session_factory = get_session_factory()
-            async with session_factory() as session:
+            # Engine efêmero por invocação — nunca o singleton cacheado, que quebraria
+            # com "attached to a different loop" a cada novo `asyncio.run()` neste
+            # processo de worker de longa duração (docs/09 db.py::scoped_session_factory,
+            # achado ao rodar o Celery Beat de verdade pela primeira vez, Sprint 2).
+            async with (
+                scoped_session_factory() as session_factory,
+                session_factory() as session,
+            ):
                 return await relay_pending_events(session)
 
         return asyncio.run(_run())

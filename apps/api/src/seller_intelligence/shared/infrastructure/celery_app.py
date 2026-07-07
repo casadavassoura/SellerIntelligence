@@ -1,9 +1,9 @@
 """App Celery — filas segregadas por provider/workload, docs/03-architecture.md §9.
 
-Sprint 1 usa apenas as filas `platform` (jobs administrativos, ex.: revogação de refresh
-token expirado) e `outbox-relay` (Outbox Relay). `sync.shopee`/`sync.bling`/`recompute`/
-`copilot` são registradas desde já para paridade de configuração, mas ficam sem consumidor
-de negócio até os Sprints 2/3/7/10 (docs/10-roadmap-sprints.md).
+Sprint 2 adiciona consumidor de negócio à fila `sync.shopee` (`sync_integration_task`/
+`fan_out_shopee_sync_task`). `sync.bling`/`recompute`/`copilot` seguem registradas para
+paridade de configuração, sem consumidor até os Sprints 3/7/10
+(docs/10-roadmap-sprints.md).
 """
 
 from __future__ import annotations
@@ -31,12 +31,25 @@ celery_app.conf.beat_schedule = {
         "schedule": schedule(run_every=2.0),  # baixa latência — docs/03-architecture.md §6.2
         "options": {"queue": "outbox-relay"},
     },
+    "shopee-sync-fan-out": {
+        "task": (
+            "seller_intelligence.modules.ingestion.infrastructure" ".tasks.fan_out_shopee_sync_task"
+        ),
+        # 30 min — sem número fixado nos docs; decisão registrada no plano de
+        # implementação do Sprint 2. Jitter de até 5 min aplicado por tenant dentro da
+        # task (docs/15-architecture-review.md §4), não neste agendamento.
+        "schedule": schedule(run_every=1800.0),
+        "options": {"queue": "sync.shopee"},
+    },
 }
 
 # O event bus in-process (shared/infrastructure/event_bus.py) só tem efeito dentro do
 # processo que efetivamente publica eventos — ou seja, o worker que roda o Outbox Relay,
 # nunca o processo da API. Handlers de cada módulo são registrados aqui, no bootstrap do
 # worker, não em main.py (docs/03-architecture.md §6).
+from seller_intelligence.modules.ingestion.infrastructure.tasks import (  # noqa: E402
+    register_sync_tasks,
+)
 from seller_intelligence.modules.platform.infrastructure.audit_handler import (  # noqa: E402
     register_audit_handlers,
 )
@@ -44,3 +57,4 @@ from seller_intelligence.shared.infrastructure.outbox import register_relay_task
 
 register_relay_task()
 register_audit_handlers()
+register_sync_tasks()
