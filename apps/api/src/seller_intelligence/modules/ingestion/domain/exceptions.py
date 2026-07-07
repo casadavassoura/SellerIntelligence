@@ -28,3 +28,9 @@ class IntegrationUnavailableError(DomainError):
     """Chamada a serviço externo (Shopee/Bling) nunca propaga exception da biblioteca
     HTTP cliente diretamente — `infrastructure/` sempre traduz para esta exception
     (docs/17-coding-standards.md §6), preservando a causa original."""
+
+
+class RateLimitExceededError(DomainError):
+    """Bucket global ou por tenant sem token disponível — falta de token não é erro do
+    provedor, é sinal de que o chamador (Celery task) deve reenfileirar com delay, nunca
+    bloquear o worker esperando (docs/03-architecture.md §11)."""

@@ -6,7 +6,13 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
+from datetime import datetime
 
+from seller_intelligence.modules.ingestion.application.dto import (
+    IngestedCampaignMetric,
+    IngestedOrder,
+    IngestedProduct,
+)
 from seller_intelligence.modules.ingestion.domain.entities import Integration, SyncLog
 from seller_intelligence.modules.ingestion.domain.value_objects import ProviderType
 
@@ -65,3 +71,21 @@ class RateLimiterPort(ABC):
     async def acquire_tenant(self, provider: ProviderType, tenant_id: uuid.UUID) -> bool:
         """Bucket por `(provider, tenant_id)` — calibrado com o limite real documentado
         pela Shopee (~10 req/s por loja), ver plano de implementação do Sprint 2."""
+
+
+class IngestionPort(ABC):
+    """Ports & Adapters para fontes externas (docs/03-architecture.md §5) — vocabulário do
+    domínio (`fetch_products`), nunca o vocabulário da API externa. `fetch_inventory`
+    (docs/06-modules.md §2) entra no Sprint 3 junto do Bling, que precisa de fato de uma
+    chamada de estoque separada; a Shopee traz estoque embutido em `fetch_products`."""
+
+    @abstractmethod
+    async def fetch_products(self, integration: Integration) -> list[IngestedProduct]: ...
+
+    @abstractmethod
+    async def fetch_orders(
+        self, integration: Integration, *, since: datetime | None = None
+    ) -> list[IngestedOrder]: ...
+
+    @abstractmethod
+    async def fetch_campaigns(self, integration: Integration) -> list[IngestedCampaignMetric]: ...

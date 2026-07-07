@@ -19,6 +19,7 @@ from seller_intelligence.modules.ingestion.domain.value_objects import ProviderT
 from seller_intelligence.modules.ingestion.infrastructure.oauth_state import create_oauth_state
 from seller_intelligence.modules.ingestion.infrastructure.shopee.adapter import ShopeeAdapter
 from tests.fakes.in_memory_ingestion_repositories import InMemoryIntegrationRepository
+from tests.fakes.rate_limiter import AlwaysAllowRateLimiter
 
 _TOKEN_RESPONSE_FIXTURE = {
     "access_token": "fixture-access-token",
@@ -38,6 +39,7 @@ def _make_service() -> tuple[IntegrationService, InMemoryIntegrationRepository]:
         api_base_url="https://partner.test-stable.shopeemobile.com",
         redirect_uri="http://localhost/callback",
         http_client=http_client,
+        rate_limiter=AlwaysAllowRateLimiter(),
     )
     repo = InMemoryIntegrationRepository()
     return IntegrationService(integration_repository=repo, shopee_adapter=adapter), repo

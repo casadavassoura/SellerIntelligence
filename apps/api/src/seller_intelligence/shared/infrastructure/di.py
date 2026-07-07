@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 from fastapi import Depends
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seller_intelligence.config.settings import get_settings
@@ -26,8 +27,10 @@ from seller_intelligence.modules.platform.infrastructure.repositories import (
     SqlAlchemyUserRepository,
 )
 from seller_intelligence.shared.infrastructure.db import get_session
+from seller_intelligence.shared.infrastructure.rate_limiter import create_shopee_rate_limiter
 
 _http_client: httpx.AsyncClient | None = None
+_shopee_redis_client: Redis | None = None
 
 
 def get_http_client() -> httpx.AsyncClient:
@@ -39,6 +42,15 @@ def get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
+def _get_shopee_redis_client() -> Redis:
+    """Estado do rate limiter vive em `redis-broker`, nunca `redis-cache`
+    (docs/03-architecture.md §11)."""
+    global _shopee_redis_client
+    if _shopee_redis_client is None:
+        _shopee_redis_client = Redis.from_url(get_settings().redis_broker_url)
+    return _shopee_redis_client
+
+
 def get_shopee_adapter() -> ShopeeAdapter:
     settings = get_settings()
     return ShopeeAdapter(
@@ -47,6 +59,7 @@ def get_shopee_adapter() -> ShopeeAdapter:
         api_base_url=settings.shopee_api_base_url,
         redirect_uri=settings.shopee_redirect_uri,
         http_client=get_http_client(),
+        rate_limiter=create_shopee_rate_limiter(_get_shopee_redis_client()),
     )
 
 
