@@ -31,6 +31,10 @@ from seller_intelligence.modules.platform.domain.exceptions import (
     MfaRequiredError,
 )
 from seller_intelligence.modules.platform.domain.value_objects import Email, TenantName
+from seller_intelligence.shared.infrastructure.tenant_context import (
+    set_authenticating_context,
+    set_tenant_context_for_job,
+)
 from seller_intelligence.shared.security import mfa as mfa_util
 from seller_intelligence.shared.security.encryption import decrypt_field, encrypt_field
 from seller_intelligence.shared.security.jwt import create_access_token
@@ -62,6 +66,14 @@ class AuthService:
         # (docs/14-ddd-tactical-design.md — User é global, mas nasce junto do primeiro
         # Tenant no fluxo de self-service).
         tenant = Tenant.create_with_owner(name=TenantName(tenant_name), owner_user_id=uuid.uuid4())
+        # RF01 é uma rota pública (sem JWT) — nenhum middleware popula o contexto de
+        # tenant. Sem isto, o INSERT em platform.outbox_event (disparado por
+        # `_users.add`/`_tenants.add` abaixo) viola a policy RLS fail-closed, porque
+        # `app.tenant_id` ficaria vazio mesmo para o próprio tenant recém-criado — o
+        # tenant_id já é conhecido aqui (gerado em `Tenant.create_with_owner`), então o
+        # contexto é estabelecido explicitamente antes de qualquer escrita, mesmo padrão
+        # já usado no callback OAuth2 (`IntegrationService.complete_shopee_connection`).
+        set_tenant_context_for_job(str(tenant.id))
         owner_membership = tenant.memberships[0]
         user = User(id=owner_membership.user_id, email=email_vo, password_hash=password_hash)
         user.record_event(
@@ -87,10 +99,21 @@ class AuthService:
         ):
             raise InvalidCredentialsError("E-mail ou senha inválidos")
 
+        # Login é rota pública (docs/07-apis.md §1) — nenhum tenant no contexto ainda,
+        # e é exatamente esta consulta que descobre a qual tenant o usuário pertence.
+        # Sem `set_authenticating_context`, a policy RLS fail-closed de `core.membership`
+        # nega a leitura mesmo para o próprio usuário (bug encontrado em validação real
+        # pós-Sprint 2, nunca coberto por teste — fakes em memória e testes de integração
+        # já setam o tenant manualmente antes de chamar o repository).
+        set_authenticating_context()
         membership = await self._tenants.find_membership_for_user(user.id)
         if membership is None:
             raise MembershipNotFoundError("Usuário sem tenant associado")
         tenant_id, role = membership
+
+        # Tenant descoberto — contexto real estabelecido antes de qualquer escrita
+        # subsequente (`_issue_token_pair` grava um novo refresh_token).
+        set_tenant_context_for_job(str(tenant_id))
 
         if role.requires_mfa:
             if not user.mfa_enabled:
@@ -122,9 +145,16 @@ class AuthService:
 
     async def refresh(self, *, refresh_token: str) -> TokenPair:
         token_hash = _hash_token(refresh_token)
+        # Mesmo motivo de `login`: refresh é rota pública, e é a busca pelo hash que
+        # descobre o tenant do token — precisa da leitura cross-tenant só-SELECT.
+        set_authenticating_context()
         record = await self._refresh_tokens.get_by_token_hash(token_hash)
         if record is None or record.revoked_at is not None or record.expires_at < datetime.now(UTC):
             raise InvalidCredentialsError("Refresh token inválido, expirado ou revogado")
+
+        # Tenant já conhecido a partir do próprio token — contexto real estabelecido
+        # antes do revoke (UPDATE) e da leitura de membership abaixo.
+        set_tenant_context_for_job(str(record.tenant_id))
 
         await self._refresh_tokens.revoke(record.id)  # rotação — nunca reaproveitado
 
@@ -138,8 +168,10 @@ class AuthService:
         )
 
     async def logout(self, *, refresh_token: str) -> None:
+        set_authenticating_context()
         record = await self._refresh_tokens.get_by_token_hash(_hash_token(refresh_token))
         if record is not None and record.revoked_at is None:
+            set_tenant_context_for_job(str(record.tenant_id))
             await self._refresh_tokens.revoke(record.id)
 
     async def setup_mfa(self, *, user_id: uuid.UUID) -> MfaSetupResult:

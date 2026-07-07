@@ -149,13 +149,19 @@ async def session_factory(
 
     engine = create_async_engine(pgbouncer_async_url, connect_args={"statement_cache_size": 0})
 
-    @event.listens_for(engine.sync_engine, "begin")
-    def _set_local(connection):
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def _set_local(connection, cursor, statement, parameters, context, executemany):
+        # Espelha shared/infrastructure/db.py::_apply_tenant_context — reaplica a cada
+        # statement (não só o primeiro da transação), com a mesma guarda de recursão.
+        if statement.lstrip().upper().startswith("SET LOCAL APP."):
+            return
         tenant_id = db_module.current_tenant_id.get()
         safe = db_module._quote_tenant_id(tenant_id)
         connection.exec_driver_sql(f"SET LOCAL app.tenant_id = '{safe}'")
         system_job_flag = "true" if db_module.is_system_job.get() else "false"
         connection.exec_driver_sql(f"SET LOCAL app.is_system_job = '{system_job_flag}'")
+        authenticating_flag = "true" if db_module.is_authenticating.get() else "false"
+        connection.exec_driver_sql(f"SET LOCAL app.is_authenticating = '{authenticating_flag}'")
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
     yield factory

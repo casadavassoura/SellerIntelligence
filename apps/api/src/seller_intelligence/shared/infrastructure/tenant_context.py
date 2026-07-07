@@ -7,7 +7,11 @@ from collections.abc import Awaitable, Callable
 from fastapi import Request, Response
 
 from seller_intelligence.shared.domain.exceptions import DomainError
-from seller_intelligence.shared.infrastructure.db import current_tenant_id, is_system_job
+from seller_intelligence.shared.infrastructure.db import (
+    current_tenant_id,
+    is_authenticating,
+    is_system_job,
+)
 from seller_intelligence.shared.security.jwt import decode_access_token
 
 
@@ -56,3 +60,14 @@ def set_system_job_context() -> None:
     request HTTP nem em job por-tenant — cada tabela que precisa dessa leitura declara a
     policy explicitamente na sua migration (só `core.integration` no Sprint 2)."""
     is_system_job.set(True)
+
+
+def set_authenticating_context() -> None:
+    """Habilita a policy `auth_resolution_read_all` (leitura cross-tenant, só-SELECT) em
+    `core.membership`/`core.refresh_token` — usado exclusivamente por
+    `AuthService.login`/`refresh`/`logout`, as únicas rotas públicas que precisam
+    descobrir o tenant de um usuário/token antes de qualquer contexto de tenant existir.
+    Distinto de `set_system_job_context`: aqui não há tenant nenhum no contexto ainda
+    (login), lá o contexto é deliberadamente cross-tenant (fan-out) — escopos e tabelas
+    diferentes, nunca a mesma flag."""
+    is_authenticating.set(True)

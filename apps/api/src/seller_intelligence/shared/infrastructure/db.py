@@ -34,6 +34,16 @@ current_tenant_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 # (docs/09-multi-tenant-strategy.md §4, shared/infrastructure/tenant_context.py).
 is_system_job: contextvars.ContextVar[bool] = contextvars.ContextVar("is_system_job", default=False)
 
+# Habilita, só para a transação corrente, a policy `auth_resolution_read_all` (leitura
+# cross-tenant só-SELECT em `core.membership`/`core.refresh_token`, migration 0003) —
+# necessária porque login/refresh/logout são rotas públicas que precisam *descobrir* o
+# tenant de um usuário/token antes de qualquer contexto de tenant existir (o problema
+# inverso do fan-out: aqui não há tenant nenhum no contexto ainda, não um tenant errado).
+# Setado só por `AuthService.login`/`refresh`/`logout`, nunca por qualquer outra rota.
+is_authenticating: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "is_authenticating", default=False
+)
+
 
 def _quote_tenant_id(raw_tenant_id: str | None) -> str:
     """Valida e normaliza o tenant_id antes de interpolar em `SET LOCAL`.
@@ -61,8 +71,26 @@ def create_engine() -> AsyncEngine:
         connect_args={"statement_cache_size": 0},
     )
 
-    @event.listens_for(engine.sync_engine, "begin")
-    def _set_local_tenant_id(connection: object) -> None:
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def _apply_tenant_context(
+        connection: object,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        # `before_cursor_execute` dispara antes de TODO statement, não só o primeiro da
+        # transação (diferente do antigo listener em "begin", que capturava o ContextVar
+        # uma única vez — bug encontrado em validação real pós-Sprint 2: login/refresh
+        # descobrem o tenant através de uma query, e a escrita seguinte, na mesma
+        # transação, precisava de um `app.tenant_id` que só existe *depois* da descoberta.
+        # Reaplicar a cada statement garante que a transação sempre reflete o valor atual
+        # do ContextVar, nunca um snapshot congelado do início da transação).
+        # Guarda contra recursão: os próprios `SET LOCAL app.*` emitidos aqui também
+        # disparariam este mesmo listener se não fossem ignorados.
+        if statement.lstrip().upper().startswith("SET LOCAL APP."):
+            return
         tenant_id = _quote_tenant_id(current_tenant_id.get())
         # Fail-closed por construção (docs/09-multi-tenant-strategy.md §2): se nenhum
         # tenant está no contexto (ex.: job administrativo, migração), a policy RLS nega
@@ -71,6 +99,10 @@ def create_engine() -> AsyncEngine:
         system_job_flag = "true" if is_system_job.get() else "false"
         connection.exec_driver_sql(  # type: ignore[attr-defined]
             f"SET LOCAL app.is_system_job = '{system_job_flag}'"
+        )
+        authenticating_flag = "true" if is_authenticating.get() else "false"
+        connection.exec_driver_sql(  # type: ignore[attr-defined]
+            f"SET LOCAL app.is_authenticating = '{authenticating_flag}'"
         )
 
     return engine
