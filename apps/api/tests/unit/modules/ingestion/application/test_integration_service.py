@@ -48,7 +48,7 @@ def _make_service() -> tuple[IntegrationService, InMemoryIntegrationRepository]:
     repo = InMemoryIntegrationRepository()
     sync_log_repo = InMemorySyncLogRepository()
     service = IntegrationService(
-        integration_repository=repo, sync_log_repository=sync_log_repo, shopee_adapter=adapter
+        integration_repository=repo, sync_log_repository=sync_log_repo, oauth_provider=adapter
     )
     return service, repo
 

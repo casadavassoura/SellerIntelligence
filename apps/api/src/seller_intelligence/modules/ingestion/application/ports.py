@@ -12,6 +12,7 @@ from seller_intelligence.modules.ingestion.application.dto import (
     IngestedCampaignMetric,
     IngestedOrder,
     IngestedProduct,
+    OAuthTokenResult,
 )
 from seller_intelligence.modules.ingestion.domain.entities import Integration, SyncLog
 from seller_intelligence.modules.ingestion.domain.value_objects import ProviderType
@@ -99,3 +100,22 @@ class IngestionPort(ABC):
 
     @abstractmethod
     async def fetch_campaigns(self, integration: Integration) -> list[IngestedCampaignMetric]: ...
+
+
+class OAuthProviderPort(ABC):
+    """Porta do fluxo OAuth2 de autorização (RF04, docs/08-auth-strategy.md §5) — distinta
+    de `IngestionPort` (que só cobre `fetch_*` de dado já autenticado). Existe para que
+    `IntegrationService` dependa de uma abstração, nunca da classe concreta do adapter
+    (`ShopeeAdapter`), mesmo princípio de inversão de dependência já aplicado aos demais
+    Repositories (docs/03-architecture.md §4.1)."""
+
+    @abstractmethod
+    def build_authorization_url(self, *, state: str) -> str: ...
+
+    @abstractmethod
+    async def exchange_code_for_token(self, *, code: str, shop_id: str) -> OAuthTokenResult: ...
+
+    @abstractmethod
+    async def refresh_access_token(
+        self, *, refresh_token: str, shop_id: str
+    ) -> OAuthTokenResult: ...

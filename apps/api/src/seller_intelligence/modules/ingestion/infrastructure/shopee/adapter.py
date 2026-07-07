@@ -23,7 +23,11 @@ from seller_intelligence.modules.ingestion.application.dto import (
     IngestedProduct,
     OAuthTokenResult,
 )
-from seller_intelligence.modules.ingestion.application.ports import IngestionPort, RateLimiterPort
+from seller_intelligence.modules.ingestion.application.ports import (
+    IngestionPort,
+    OAuthProviderPort,
+    RateLimiterPort,
+)
 from seller_intelligence.modules.ingestion.domain.entities import Integration
 from seller_intelligence.modules.ingestion.domain.exceptions import (
     IntegrationUnavailableError,
@@ -55,7 +59,7 @@ def _extract_list(data: dict[str, object], *, list_key: str) -> list[dict[str, o
     return [item for item in items if isinstance(item, dict)]
 
 
-class ShopeeAdapter(IngestionPort):
+class ShopeeAdapter(IngestionPort, OAuthProviderPort):
     def __init__(
         self,
         *,

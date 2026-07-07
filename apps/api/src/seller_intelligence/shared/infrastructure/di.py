@@ -89,5 +89,5 @@ async def get_integration_service(
     yield IntegrationService(
         integration_repository=SqlAlchemyIntegrationRepository(session),
         sync_log_repository=SqlAlchemySyncLogRepository(session),
-        shopee_adapter=get_shopee_adapter(),
+        oauth_provider=get_shopee_adapter(),
     )

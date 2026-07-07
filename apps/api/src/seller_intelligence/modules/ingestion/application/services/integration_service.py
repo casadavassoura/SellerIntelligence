@@ -1,7 +1,8 @@
 """Casos de uso de conexão de integração (RF04) — docs/08-auth-strategy.md §5.
 
-Service Layer: orquestra domínio + repositórios + adapter via interfaces, nunca acessa
-SQLAlchemy/httpx diretamente (docs/03-architecture.md §4.1)."""
+Service Layer: orquestra domínio + repositórios + adapter via interfaces, nunca depende de
+uma classe concreta de `infrastructure/` (docs/03-architecture.md §4.1) — só de
+`OAuthProviderPort`."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import uuid
 
 from seller_intelligence.modules.ingestion.application.ports import (
     IntegrationRepository,
+    OAuthProviderPort,
     SyncLogRepository,
 )
 from seller_intelligence.modules.ingestion.domain.entities import Integration, SyncLog
@@ -21,8 +23,7 @@ from seller_intelligence.modules.ingestion.infrastructure.oauth_state import (
     create_oauth_state,
     decode_oauth_state,
 )
-from seller_intelligence.modules.ingestion.infrastructure.shopee.adapter import ShopeeAdapter
-from seller_intelligence.shared.infrastructure.db import current_tenant_id
+from seller_intelligence.shared.infrastructure.tenant_context import set_tenant_context_for_job
 from seller_intelligence.shared.security.encryption import encrypt_field
 
 
@@ -32,15 +33,15 @@ class IntegrationService:
         *,
         integration_repository: IntegrationRepository,
         sync_log_repository: SyncLogRepository,
-        shopee_adapter: ShopeeAdapter,
+        oauth_provider: OAuthProviderPort,
     ) -> None:
         self._integrations = integration_repository
         self._sync_logs = sync_log_repository
-        self._shopee_adapter = shopee_adapter
+        self._oauth_provider = oauth_provider
 
     def build_shopee_authorization_url(self, *, tenant_id: uuid.UUID) -> str:
         state = create_oauth_state(tenant_id=tenant_id)
-        return self._shopee_adapter.build_authorization_url(state=state)
+        return self._oauth_provider.build_authorization_url(state=state)
 
     async def complete_shopee_connection(
         self, *, state: str, code: str, shop_id: str
@@ -48,9 +49,10 @@ class IntegrationService:
         """O callback OAuth2 é uma rota pública (docs/07-apis.md §1) — não há JWT, então o
         `tenant_id` vem exclusivamente do `state` assinado, nunca de parâmetro de URL/body
         (docs/09-multi-tenant-strategy.md §4). O contexto de tenant da transação é
-        estabelecido aqui, explicitamente, mesmo padrão de uma Celery task."""
+        estabelecido aqui, explicitamente, mesmo padrão de uma Celery task
+        (`set_tenant_context_for_job`, nunca o ContextVar tocado diretamente)."""
         tenant_id = decode_oauth_state(state)
-        current_tenant_id.set(str(tenant_id))
+        set_tenant_context_for_job(str(tenant_id))
 
         existing = await self._integrations.get_active_by_tenant_and_provider(
             tenant_id=tenant_id, provider=ProviderType.SHOPEE
@@ -60,7 +62,7 @@ class IntegrationService:
                 f"Tenant {tenant_id} já tem uma integração Shopee ativa"
             )
 
-        token_result = await self._shopee_adapter.exchange_code_for_token(
+        token_result = await self._oauth_provider.exchange_code_for_token(
             code=code, shop_id=shop_id
         )
         credential = OAuthCredential(
